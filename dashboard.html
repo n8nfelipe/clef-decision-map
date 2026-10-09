@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Corredor DF-GO | Centro de trânsito</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root {
+      --ink: #e8f1ee;
+      --muted: #8ca19d;
+      --panel: #101b1c;
+      --panel-2: #162526;
+      --line: rgba(188, 220, 210, .14);
+      --cyan: #55e3c3;
+      --cyan-dim: #1d6559;
+      --amber: #f4b85e;
+      --red: #ff6f61;
+      --blue: #6cb6ff;
+      --shadow: 0 20px 60px rgba(0, 0, 0, .35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      background: #091112;
+      color: var(--ink);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+    }
+
+    .app-shell { height: 100%; position: relative; }
+    #map { position: absolute; inset: 0; background: #c8d4cc; }
+    .leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; }
+    .leaflet-control-zoom a {
+      background: #132122 !important;
+      color: var(--ink) !important;
+      border-color: var(--line) !important;
+    }
+    .leaflet-control-attribution { background: rgba(10, 19, 19, .75) !important; color: #b4c6c0; }
+    .leaflet-control-attribution a { color: var(--cyan); }
+
+    .control-panel {
+      position: absolute;
+      z-index: 1000;
+      top: 22px;
+      left: 22px;
+      bottom: 22px;
+      width: min(390px, calc(100vw - 44px));
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      background: rgba(16, 27, 28, .96);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+      overflow: auto;
+      scrollbar-color: #2d5550 transparent;
+    }
+
+    .brand-row, .status-row, .summary-row, .point-row { display: flex; align-items: center; }
+    .brand-row { justify-content: space-between; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      position: relative;
+      border: 1px solid var(--cyan);
+      transform: rotate(45deg);
+    }
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      inset: 5px;
+      background: var(--cyan);
+    }
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--cyan);
+      font: 500 11px "DM Mono", monospace;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 4px rgba(85, 227, 195, .12); }
+    h1 { margin: 0; max-width: 9ch; font-size: clamp(32px, 5vw, 48px); line-height: .94; letter-spacing: -.04em; font-weight: 600; }
+    .lede { margin: -8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+    .route-form { display: grid; gap: 9px; }
+    .field { display: grid; gap: 6px; }
+    label { color: var(--muted); font: 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+    input {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: none;
+      background: #0c1718;
+      color: var(--ink);
+      font: 13px "IBM Plex Sans", system-ui, sans-serif;
+    }
+    input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(85, 227, 195, .12); }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: var(--cyan);
+      color: #08201c;
+      cursor: pointer;
+      font: 700 12px "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: .02em;
+    }
+    button:hover { background: #7df1d5; }
+    button:disabled { cursor: wait; opacity: .55; }
+
+    .summary { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 14px 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .metric { min-width: 0; }
+    .metric-value { font: 500 21px "DM Mono", monospace; letter-spacing: -.08em; white-space: nowrap; }
+    .metric-label { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.2; text-transform: uppercase; }
+
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .section-title { margin: 0; font-size: 13px; font-weight: 600; }
+    .section-meta { color: var(--muted); font: 11px "DM Mono", monospace; }
+    .point-list { display: grid; gap: 8px; }
+    .point-row {
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(22, 37, 38, .72);
+      cursor: pointer;
+    }
+    .point-row:hover { border-color: var(--cyan-dim); background: #1a3030; }
+    .point-main { min-width: 0; }
+    .point-id { color: var(--ink); font: 500 12px "DM Mono", monospace; }
+    .point-coords { margin-top: 3px; color: var(--muted); font: 11px "DM Mono", monospace; }
+    .severity { flex: none; font: 500 11px "DM Mono", monospace; text-transform: uppercase; }
+    .severity.jam { color: var(--red); }
+    .severity.slow { color: var(--amber); }
+    .empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .decision {
+      margin-top: auto;
+      padding: 15px;
+      border-radius: 10px;
+      background: #183532;
+      border: 1px solid rgba(85, 227, 195, .25);
+    }
+    .decision-label { color: var(--cyan); font: 11px "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .decision-value { margin-top: 7px; font-size: 21px; line-height: 1.05; font-weight: 600; letter-spacing: -.04em; }
+    .decision-detail { margin-top: 6px; color: #a9c8c0; font-size: 12px; line-height: 1.45; }
+    .legend { display: flex; gap: 12px; color: var(--muted); font: 11px "DM Mono", monospace; text-transform: uppercase; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .legend .normal { background: var(--cyan); }
+    .legend .slow { background: var(--amber); }
+    .legend .jam { background: var(--red); }
+
+    .map-note {
+      position: absolute;
+      z-index: 900;
+      right: 22px;
+      top: 22px;
+      padding: 9px 12px;
+      border: 1px solid rgba(10, 19, 19, .18);
+      border-radius: 8px;
+      background: rgba(246, 249, 244, .9);
+      color: #29413d;
+      font: 11px "DM Mono", monospace;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .loading { display: none; color: var(--amber); font: 11px "DM Mono", monospace; }
+    .loading.show { display: block; }
+    .error { display: none; padding: 10px 12px; border: 1px solid rgba(255, 111, 97, .35); border-radius: 8px; color: #ffb5aa; background: rgba(89, 27, 23, .5); font-size: 12px; line-height: 1.4; }
+    .error.show { display: block; }
+
+    @media (max-width: 760px) {
+      body { overflow: auto; }
+      .app-shell { min-height: 100%; }
+      #map { position: relative; height: 62vh; min-height: 420px; }
+      .control-panel { position: relative; inset: auto; width: auto; min-height: 0; margin: -14px 10px 10px; padding: 20px; border-radius: 16px; }
+      .map-note { top: 14px; right: 14px; }
+      h1 { max-width: 11ch; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <div id="map" aria-label="Mapa da rota Brasília a Valparaíso de Goiás"></div>
+    <div class="map-note">dados de trânsito · Google Routes</div>
+    <aside class="control-panel" aria-live="polite">
+      <div class="brand-row">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"></span> Corredor DF-GO</div>
+        <div class="live-pill"><span class="live-dot"></span><span>ao vivo</span></div>
+      </div>
+      <div>
+        <h1>Trânsito que pede decisão.</h1>
+        <p class="lede">Uma leitura operacional do corredor, com os pontos de maior atrito destacados pelo Clef.</p>
+      </div>
+      <form class="route-form" id="route-form">
+        <div class="field"><label for="origin">Origem</label><input id="origin" value="Brasília, DF, Brazil" autocomplete="off"></div>
+        <div class="field"><label for="destination">Destino</label><input id="destination" value="Valparaíso de Goiás, GO, Brazil" autocomplete="off"></div>
+        <button id="refresh" type="submit">Atualizar leitura</button>
+        <div class="loading" id="loading">Consultando rota e Clef...</div>
+        <div class="error" id="error" role="alert"></div>
+      </form>
+      <div class="summary" id="summary" hidden>
+        <div class="metric"><div class="metric-value" id="delay">--</div><div class="metric-label">atraso estimado</div></div>
+        <div class="metric"><div class="metric-value" id="distance">--</div><div class="metric-label">distância</div></div>
+        <div class="metric"><div class="metric-value" id="critical-count">--</div><div class="metric-label">pontos críticos</div></div>
+      </div>
+      <section>
+        <div class="section-head"><h2 class="section-title">Trechos em atenção</h2><span class="section-meta" id="updated">--</span></div>
+        <div class="point-list" id="point-list"><p class="empty">Atualize a leitura para carregar os pontos críticos da rota.</p></div>
+      </section>
+      <div class="legend"><span><i class="normal"></i> normal</span><span><i class="slow"></i> lento</span><span><i class="jam"></i> congestionado</span></div>
+      <section class="decision" id="decision" hidden>
+        <div class="decision-label">prioridade do Clef</div>
+        <div class="decision-value" id="decision-value">--</div>
+        <div class="decision-detail" id="decision-detail">--</div>
+      </section>
+    </aside>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([-16.1, -47.9], 10);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let routeLayers = [];
+    const palette = { NORMAL: '#55e3c3', SLOW: '#f4b85e', TRAFFIC_JAM: '#ff6f61' };
+    const labels = { NORMAL: 'normal', SLOW: 'lento', TRAFFIC_JAM: 'congestionado' };
+
+    function decodePolyline(encoded) {
+      const points = [];
+      let index = 0, lat = 0, lng = 0;
+      while (index < encoded.length) {
+        let result = 0, shift = 0, byte;
+        do { byte = encoded.charCodeAt(index++) - 63; result |= (byte & 31) << shift; shift += 5; } while (byte >= 32);
+        lat += (result & 1) ? ~(result >> 1) : result >> 1;
+        result = 0; shift = 0;
+        do { byte = encoded.charCodeAt(index++) - 63; result |= (byte & 31) << shift; shift += 5; } while (byte >= 32);
+        lng += (result & 1) ? ~(result >> 1) : result >> 1;
+        points.push([lat / 1e5, lng / 1e5]);
+      }
+      return points;
+    }
+
+    function clearMap() {
+      routeLayers.forEach(layer => map.removeLayer(layer));
+      routeLayers = [];
+    }
+
+    function addRoute(route) {
+      clearMap();
+      const points = route.polyline ? decodePolyline(route.polyline) : [];
+      const bounds = [];
+      route.traffic_intervals.forEach(interval => {
+        const start = Math.max(0, interval.startPolylinePointIndex || 0);
+        const end = Math.min(points.length - 1, interval.endPolylinePointIndex || start + 1);
+        const segment = points.slice(start, end + 1);
+        if (segment.length < 2) return;
+        const line = L.polyline(segment, { color: palette[interval.speed] || '#6cb6ff', weight: 7, opacity: .88, lineCap: 'round' }).addTo(map);
+        routeLayers.push(line);
+        bounds.push(...segment);
+      });
+      if (!route.traffic_intervals.length && points.length) {
+        const line = L.polyline(points, { color: palette.NORMAL, weight: 7, opacity: .88, lineCap: 'round' }).addTo(map);
+        routeLayers.push(line);
+        bounds.push(...points);
+      }
+      if (points.length) {
+        const start = L.circleMarker(points[0], { radius: 7, color: '#0c1718', weight: 3, fillColor: '#55e3c3', fillOpacity: 1 }).bindTooltip('Origem').addTo(map);
+        const end = L.circleMarker(points[points.length - 1], { radius: 7, color: '#0c1718', weight: 3, fillColor: '#6cb6ff', fillOpacity: 1 }).bindTooltip('Destino').addTo(map);
+        routeLayers.push(start, end);
+      }
+      route.critical_points.forEach(point => {
+        const color = point.speed === 'TRAFFIC_JAM' ? palette.TRAFFIC_JAM : palette.SLOW;
+        const marker = L.circleMarker([point.latitude, point.longitude], { radius: 10, color, weight: 3, fillColor: color, fillOpacity: .35 }).bindPopup(`<strong>${point.id}</strong><br>${labels[point.speed]}<br><a href="${point.maps_url}" target="_blank" rel="noopener">Abrir no Maps</a>`).addTo(map);
+        routeLayers.push(marker);
+        bounds.push([point.latitude, point.longitude]);
+      });
+      if (bounds.length) map.fitBounds(bounds, { padding: [32, 32] });
+    }
+
+    function formatMinutes(seconds) { return `${Math.round(seconds / 60)} min`; }
+    function formatDistance(meters) { return meters >= 1000 ? `${(meters / 1000).toFixed(0)} km` : `${meters} m`; }
+    function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+
+    function render(data) {
+      const { route, clef } = data;
+      addRoute(route);
+      document.querySelector('#summary').hidden = false;
+      document.querySelector('#decision').hidden = false;
+      document.querySelector('#delay').textContent = formatMinutes(route.delay_seconds);
+      document.querySelector('#distance').textContent = formatDistance(route.distance_meters);
+      document.querySelector('#critical-count').textContent = route.critical_points.length;
+      document.querySelector('#updated').textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const list = document.querySelector('#point-list');
+      list.innerHTML = '';
+      if (!route.critical_points.length) {
+        list.innerHTML = '<p class="empty">Nenhum trecho lento ou congestionado foi identificado neste momento.</p>';
+      } else {
+        route.critical_points.forEach(point => {
+          const item = document.createElement('button');
+          item.type = 'button'; item.className = 'point-row';
+          item.innerHTML = `<span class="point-main"><span class="point-id">${escapeHtml(point.id)}</span><span class="point-coords">${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}</span></span><span class="severity ${point.speed === 'TRAFFIC_JAM' ? 'jam' : 'slow'}">${escapeHtml(labels[point.speed] || point.speed)}</span>`;
+          item.addEventListener('click', () => { map.setView([point.latitude, point.longitude], 14); routeLayers.find(layer => layer.getLatLng && layer.getLatLng().lat === point.latitude)?.openPopup(); });
+          list.appendChild(item);
+        });
+      }
+      document.querySelector('#decision-value').textContent = `${clef.recommended_action} · ${clef.most_critical_point}`;
+      document.querySelector('#decision-detail').textContent = `Criticidade ${clef.criticality.toFixed(2)} · confiança ${(clef.confidence * 100).toFixed(0)}%${clef.prioritize_intervention ? ' · intervenção prioritária' : ''}`;
+    }
+
+    async function refresh(event) {
+      event?.preventDefault();
+      const button = document.querySelector('#refresh');
+      const loading = document.querySelector('#loading');
+      const error = document.querySelector('#error');
+      button.disabled = true; loading.classList.add('show'); error.classList.remove('show');
+      const params = new URLSearchParams({ origin: document.querySelector('#origin').value, destination: document.querySelector('#destination').value });
+      try {
+        const response = await fetch(`/api/traffic?${params}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível consultar a rota.');
+        render(data);
+      } catch (err) {
+        error.textContent = err.message;
+        error.classList.add('show');
+      } finally {
+        button.disabled = false; loading.classList.remove('show');
+      }
+    }
+    document.querySelector('#route-form').addEventListener('submit', refresh);
+  </script>
+</body>
+</html>
